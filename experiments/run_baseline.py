@@ -2,7 +2,6 @@
 # Temel modelleri çalıştırma ve değerlendirme betiği. (Filtreleme yok)
 
 import os
-from tkinter import Label
 import pandas as pd
 
 import sys
@@ -15,7 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 
 from sklearn.pipeline import Pipeline # Pipeline oluşturma
-from sklearn.preprocessing import LabelEncoder # Label Encoding için
+from sklearn.preprocessing import LabelEncoder  # Hedef değişkeni sayısallaştırmak için
 
 from src.data_loader import load_raw_data # Ham veriyi yükleme fonksiyonu
 from src.preprocessing import ( # Ön işleme fonksiyonları
@@ -28,6 +27,7 @@ from src.evaluation import ( # Değerlendirme metrikleri
     make_metrics_row,
     confusion_matrix_df,
 )
+from src.models.deep import get_deep_models # Derin öğrenme modellerini alma fonksiyonu
 
 def safe_predict_proba(clf, X_test): # clf: sınıflandırıcı, X_test: test verisi
     """
@@ -58,16 +58,20 @@ def main():
     print(f"Hedef değişken etiketleri: {label_names}")
     print(f"Sınıflar Sayısallaştırıldı: {dict(zip(labels,label_names))}")
 
-    # 5. Eğitim ve test verisi ayır
+    # 4. Eğitim ve test verisi ayır
     X_train, X_test, y_train, y_test = make_train_test_split(X, y_encoded)
     print(f"Eğitim ve test verisi ayrıldı. Eğitim şekli: {X_train.shape}, Test şekli: {X_test.shape}")
 
     # 6. Ön işleme adımlarını oluştur
     preprocessor = build_preprocessor(X_train)
 
-    # 7. Klasik modelleri al
+    # 7. Klasik modelleri  ve derin öğrenme modellerini al
     models = get_classical_models()
     print(f"Klasik modeller alındı: {list(models.keys())}")
+    deep_models = get_deep_models()
+    print(f"Derin öğrenme modelleri alındı: {list(deep_models.keys())}")
+
+    models.update(deep_models) # Klasik ve derin öğrenme modellerini birleştir
 
     # Eğitim ve değerlendirme sonuçlarını saklamak için listeler
     os.makedirs("results/tables", exist_ok = True) # Sonuç tablosu klasörü oluştur
@@ -101,8 +105,8 @@ def main():
         ) # Değerlendirme metriklerini hesapla
         rows.append(row) # Satırı listeye ekle
 
-        auc_val = row["roc_auc_ovr_macro"] # AUC makro değeri
-        auc_str = f"{auc_val:.4f}" if pd.notna(auc_val) else "NA" # AUC değeri stringi
+        auc_val = row.get("roc_auc_ovr_macro", None) # AUC makro değeri
+        auc_str = f"{auc_val:.4f}" if (auc_val is not None and pd.notna(auc_val)) else "NA" # AUC değeri stringi
 
         print(f"Değerlendirme Sonuçları : \n")
         print(
@@ -116,19 +120,19 @@ def main():
         cm_df = confusion_matrix_df(y_test, y_pred, labels = labels)
         cm_df.index = label_names
         cm_df.columns = label_names
-        cm_path = f"results/tables/confusion_matrix_{name}.csv"
+        cm_path = f"results/tables-baseline/confusion_matrix_{name}.csv"
         cm_df.to_csv(cm_path, index = True)
     
     # Sonuçları DataFrame'e dönüştür ve F1 makroya göre sırala
     results_df = pd.DataFrame(rows).sort_values(by = "f1_macro", ascending = False) 
 
     # Sonuçları CSV dosyasına kaydet
-    out_path = "results/tables/baseline_metrics.csv"
+    out_path = "results/tables-baseline/baseline_metrics.csv"
     results_df.to_csv(out_path, index = False) 
 
     print("\n=== BASELINE ÇALIŞTIRMA TAMAMLANDI ===")
     print(results_df)
-    print(f"\nBenzerlik metrikleri '{out_path}' dosyasına kaydedildi.")
+    print(f"\nBaseline metrikleri '{out_path}' dosyasına kaydedildi.")
     print(f"Karışıklık matrisleri 'results/tables/' klasörüne kaydedildi.")
 
 if __name__ == "__main__":
