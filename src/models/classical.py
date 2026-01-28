@@ -1,6 +1,8 @@
 # src/models/classical.py
 # Klasik makine öğrenimi modelleri buraya yazılır.
 
+import random
+from tabnanny import verbose
 from sklearn import svm
 from sklearn.linear_model import LogisticRegression
 from sklearn.tree import DecisionTreeClassifier # Karar Ağacı Sınıflandırıcı
@@ -10,6 +12,7 @@ from sklearn.svm import SVC # Destek Vektör Makineleri Sınıflandırıcı
 from sklearn.neural_network import MLPClassifier # Çok Katmanlı Algılayıcı (Yapay Sinir Ağı) Sınıflandırıcı
 from sklearn.ensemble import VotingClassifier # Oylama Sınıflandırıcı
 from xgboost import XGBClassifier # XGBoost Sınıflandırıcı
+import lightgbm as lgb # LightGBM Sınıflandırıcı 
 
 from src.config import RANDOM_STATE # Rastgelelik durumu
 
@@ -60,7 +63,14 @@ def get_classical_models():
             random_state = RANDOM_STATE, # Rastgelelik durumu
             n_jobs = -1 # Tüm çekirdekleri kullan
         ),
-        "VCLF" : None # Oylama Sınıflandırıcı (sonradan eklenecek)
+        "VCLF" : None, # Oylama Sınıflandırıcı (sonradan eklenecek)
+        "LGB" : lgb.LGBMClassifier(
+            n_estimators = 400, # Ağaç sayısı
+            learning_rate = 0.05, # Öğrenme hızı
+            max_depth = 4, # Maksimum derinlik
+            random_state = RANDOM_STATE, # Rastgelelik durumu
+            verbose = -1 # Sessiz mod
+        ),
     }
     models["VCLF"] = VotingClassifier(
         estimators = [
