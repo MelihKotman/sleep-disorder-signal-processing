@@ -86,6 +86,20 @@ def main():
                 y_proba = None
                 if hasattr(clf, "predict_proba"):
                     y_proba = clf.predict_proba(X_test)
+
+                # --- ROC CURVE ICIN HAM VERIYI KAYDET ---
+                if y_proba is not None:
+                    roc_raw_df = pd.DataFrame(y_proba, columns=[f"proba_class_{i}" for i in labels])
+                    roc_raw_df["true_label"] = y_test
+                    roc_raw_df["base_model"] = model_name
+                    roc_raw_df["filter_method"] = filter_name
+
+                    roc_dir = "results/roc_raw"
+                    os.makedirs(roc_dir, exist_ok=True)
+
+                    roc_filename = f"roc_raw_{model_name}_{filter_name}.csv"
+                    roc_raw_path = os.path.join(roc_dir, roc_filename)
+                    roc_raw_df.to_csv(roc_raw_path, index=False)
                 
                 # Kaydet
                 row = make_metrics_row(f"{model_name}_{filter_name}", y_test, y_pred, labels, y_proba)

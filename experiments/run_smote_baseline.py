@@ -6,6 +6,8 @@ import pandas as pd
 import sys
 from pathlib import Path
 
+import numpy as np
+
 # Proje kök dizinini yola ekle
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -90,6 +92,7 @@ def main():
 
     
     rows = [] 
+    roc_rows = []
 
     for name, model in models.items():
         print(f"\n--- Model (SMOTE): {name} eğitiliyor... ---")
@@ -101,6 +104,23 @@ def main():
         # Tahmin (İşlenmiş test verisi ile)
         y_pred = model.predict(X_test_transformed)
         y_proba = safe_predict_proba(model, X_test_transformed)
+
+        # İsimlerin sonuna _SMOTE ekleyelim ki karışmasın
+        model_display_name = f"{name}_SMOTE"
+
+        # ===============================
+        # ROC Curve için ham veriyi kaydet
+        # ===============================
+        if y_proba is not None:
+            for i in range(len(y_test)):
+                roc_row = {
+                    "model": model_display_name,
+                    "filter_method": "smote",
+                    "true_label": y_test[i]
+                }
+                for c in range(y_proba.shape[1]):
+                    roc_row[f"proba_class_{c}"] = y_proba[i, c]
+                roc_rows.append(roc_row)
 
         # İsimlerin sonuna _SMOTE ekleyelim ki karışmasın
         model_display_name = f"{name}_SMOTE"
@@ -144,6 +164,16 @@ def main():
     # Dosyayı kaydet
     out_path = "results/tables-baseline-smote/baseline_smote_metrics.csv"
     results_df.to_csv(out_path, index=False)
+
+    # ===============================
+    # ROC raw verisini kaydet
+    # ===============================
+    if len(roc_rows) > 0:
+        roc_raw_df = pd.DataFrame(roc_rows)
+        roc_raw_out = "results/roc_raw/roc_raw_baseline_smote.csv"
+        os.makedirs(os.path.dirname(roc_raw_out), exist_ok=True)
+        roc_raw_df.to_csv(roc_raw_out, index=False)
+        print(f"ROC raw verisi '{roc_raw_out}' dosyasına kaydedildi.")
 
     print("\n=== SMOTE İŞLEMİ TAMAMLANDI ===")
     print(results_df)

@@ -3,6 +3,7 @@
 
 import os
 import pandas as pd
+import numpy as np
 
 import sys
 from pathlib import Path
@@ -76,6 +77,7 @@ def main():
     # Eğitim ve değerlendirme sonuçlarını saklamak için listeler
     os.makedirs("results/tables", exist_ok = True) # Sonuç tablosu klasörü oluştur
     os.makedirs("results/figures", exist_ok = True) # Sonuç figür klasörü oluştur
+    os.makedirs("results/roc_raw", exist_ok=True)
 
     rows = [] # Değerlendirme metrikleri için satırlar
 
@@ -95,6 +97,18 @@ def main():
 
         #AUC için olasılık tahminleri al (Pipeline'da predict_proba vardır)
         y_proba = safe_predict_proba(clf, X_test)
+
+        # =====================================================
+        # ROC CURVE için ham veriyi kaydet
+        # =====================================================
+        if y_proba is not None:
+            roc_raw_df = pd.DataFrame(y_proba, columns=[f"proba_class_{i}" for i in range(y_proba.shape[1])])
+            roc_raw_df["true_label"] = y_test
+            roc_raw_df["model"] = name
+            roc_raw_df["filter_method"] = "baseline"
+
+            roc_raw_path = f"results/roc_raw/roc_raw_{name}_baseline.csv"
+            roc_raw_df.to_csv(roc_raw_path, index=False)
 
         row = make_metrics_row(
             model_name = name,
