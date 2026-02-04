@@ -64,6 +64,7 @@ def main():
     
     output_dir = "results/tables-filtered"
     rows = []
+    roc_rows = []
 
     for filter_name in filter_methods:
         print(f"\n FILTRE: {filter_name.upper()} uygulanıyor...")
@@ -87,19 +88,17 @@ def main():
                 if hasattr(clf, "predict_proba"):
                     y_proba = clf.predict_proba(X_test)
 
-                # --- ROC CURVE ICIN HAM VERIYI KAYDET ---
+                # --- ROC CURVE ICIN HAM VERIYI TEK DOSYADA TOPLA ---
                 if y_proba is not None:
-                    roc_raw_df = pd.DataFrame(y_proba, columns=[f"proba_class_{i}" for i in labels])
-                    roc_raw_df["true_label"] = y_test
-                    roc_raw_df["base_model"] = model_name
-                    roc_raw_df["filter_method"] = filter_name
-
-                    roc_dir = "results/roc_raw"
-                    os.makedirs(roc_dir, exist_ok=True)
-
-                    roc_filename = f"roc_raw_{model_name}_{filter_name}.csv"
-                    roc_raw_path = os.path.join(roc_dir, roc_filename)
-                    roc_raw_df.to_csv(roc_raw_path, index=False)
+                    for i in range(len(y_test)):
+                        roc_row = {
+                            "base_model": model_name,
+                            "filter_method": filter_name,
+                            "true_label": int(y_test[i])
+                        }
+                        for c in range(y_proba.shape[1]):
+                            roc_row[f"proba_class_{c}"] = float(y_proba[i, c])
+                        roc_rows.append(roc_row)
                 
                 # Kaydet
                 row = make_metrics_row(f"{model_name}_{filter_name}", y_test, y_pred, labels, y_proba)
@@ -127,6 +126,12 @@ def main():
     
     out_path = "results/tables-filtered/filtered_metrics_all.csv"
     results_df.to_csv(out_path, index=False)
+
+    # --- TEK ROC RAW DOSYASINI KAYDET ---
+    roc_dir = "results/roc_raw"
+    os.makedirs(roc_dir, exist_ok=True)
+    roc_df = pd.DataFrame(roc_rows)
+    roc_df.to_csv(os.path.join(roc_dir, "roc_raw_all.csv"), index=False)
 
     print("\n=== DENEY SONUCU  ===")
     print(results_df[["base_model", "filter_method", "f1_macro"]].head(5))

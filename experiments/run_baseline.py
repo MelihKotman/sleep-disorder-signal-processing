@@ -80,6 +80,7 @@ def main():
     os.makedirs("results/roc_raw", exist_ok=True)
 
     rows = [] # Değerlendirme metrikleri için satırlar
+    roc_rows = []
 
     for name, model in models.items():
         print(f"\n--- Model: {name} eğitiliyor ve değerlendiriliyor ---")
@@ -102,13 +103,15 @@ def main():
         # ROC CURVE için ham veriyi kaydet
         # =====================================================
         if y_proba is not None:
-            roc_raw_df = pd.DataFrame(y_proba, columns=[f"proba_class_{i}" for i in range(y_proba.shape[1])])
-            roc_raw_df["true_label"] = y_test
-            roc_raw_df["model"] = name
-            roc_raw_df["filter_method"] = "baseline"
-
-            roc_raw_path = f"results/roc_raw/roc_raw_{name}_baseline.csv"
-            roc_raw_df.to_csv(roc_raw_path, index=False)
+            for i in range(len(y_test)):
+                roc_row = {
+                    "model": name,
+                    "filter_method": "baseline",
+                    "true_label": int(y_test[i])
+                }
+                for c in range(y_proba.shape[1]):
+                    roc_row[f"proba_class_{c}"] = float(y_proba[i, c])
+                roc_rows.append(roc_row)
 
         row = make_metrics_row(
             model_name = name,
@@ -137,6 +140,14 @@ def main():
         cm_path = f"results/tables-baseline/confusion_matrix_{name}.csv"
         cm_df.to_csv(cm_path, index = True)
     
+    # =====================================================
+    # ROC CURVE ham verisini tek dosyada kaydet
+    # =====================================================
+    roc_raw_df = pd.DataFrame(roc_rows)
+    roc_raw_path = "results/roc_raw/roc_raw_baseline.csv"
+    roc_raw_df.to_csv(roc_raw_path, index=False)
+    print(f"ROC raw verisi kaydedildi: {roc_raw_path}")
+
     # Sonuçları DataFrame'e dönüştür ve F1 makroya göre sırala
     results_df = pd.DataFrame(rows).sort_values(by = "f1_macro", ascending = False) 
 
