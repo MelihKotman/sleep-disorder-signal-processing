@@ -1,181 +1,200 @@
- # src/filters/filters.py
- # Gelişmiş sinyal işleme filtreleri için fonksiyonlar
+# src/filters/filters.py
 import numpy as np
 import pandas as pd
-from scipy.signal import butter, filtfilt, savgol_filter, lfilter
+from scipy.signal import butter, filtfilt, savgol_filter
 from scipy.ndimage import gaussian_filter1d, median_filter
 from scipy.interpolate import UnivariateSpline
 import pywt
 import statsmodels.api as sm
 
+# --- YARDIMCI FONKSİYONLAR ---
 
-# --- YARDIMCI FONKSİYONLARI ---
-# Hampel filtresi - For döngüsü ile uygulanmış versiyon
-def hampel_filter_forloop(input_series, window_size=5, n_sigmas= 3):
+def hampel_filter_pandas(input_series, window_size=5, n_sigmas=3):
     """
-    Hampel Filtresi: Zaman serisi verilerindeki aykırı değerleri tespit etmek ve düzeltmek için kullanılır.
-    Parametreler: 
-    - input_series: Giriş zaman serisi verisi (Pandas Series).
-    - window_size: Pencere boyutu (tek sayı olmalı).
-    - n_sigmas: Aykırı değerleri tanımlamak için kullanılan standart sapma sayısı.
+    Hampel Filtresi (Optimize Edilmiş):
+    For döngüsü yerine Pandas rolling fonksiyonları kullanılarak hızlandırılmıştır.
     """
-    n = len(input_series)
+    # Pandas serisine çevir (eğer değilse)
+    if not isinstance(input_series, pd.Series):
+        input_series = pd.Series(input_series)
+    
+    k = 1.4826  # Gaussian dağılım ölçek sabiti
+    
+    # Kayan medyan (Rolling Median)
+    rolling_median = input_series.rolling(window=window_size, center=True).median()
+    
+    # MAD (Median Absolute Deviation) hesaplama
+    # MAD = median(|x - median|)
+    # Pandas rolling ile MAD doğrudan yok, ama şu şekilde yaklaşık ve hızlı hesaplanabilir:
+    # Veya tam doğruluk için lambda kullanılır (biraz yavaştır ama for döngüsünden hızlıdır)
+    # Burada hız için rolling.std() yerine, MAD mantığına sadık kalıyoruz:
+    
+    difference = np.abs(input_series - rolling_median)
+    rolling_mad = difference.rolling(window=window_size, center=True).median()  # type: ignore
+    
+    threshold = n_sigmas * k * rolling_mad
+    
+    # Aykırı değerleri tespit et
+    outlier_idx = difference > threshold
+    
+    # Seriyi kopyala ve değiştir
     new_series = input_series.copy()
-    k = 1.4826 # Gaussian dağılım için sabit ölçek
+    new_series[outlier_idx] = rolling_median[outlier_idx]
+    
+    # Baş ve sondaki NaN değerleri (pencere nedeniyle oluşan) orijinal veriyle doldur
+    new_series.fillna(input_series, inplace=True)
+    
+    return new_series.values
 
-    # Kayan Pencere (Rolling Window)
-    for i in range(window_size, n - window_size):
-        x0 = np.median(input_series[(i - window_size): (i + window_size)]) # Merkezi eğilim ölçüsü
-        S0 = k * np.median(np.abs(input_series[(i - window_size): (i + window_size)] - x0)) # Dağılım ölçüsü (MAD)
-        if (np.abs(input_series[i] - x0) > n_sigmas * S0):
-            new_series[i] = x0 # Aykırı değeri merkezi eğilim ile değiştir
-
-    return new_series
-
-# Kalman Filtresi - Basit bir uygulama
-def kalman_filter_1d(data, process_variance=1e-5, measurement_variance = 0.1):
+def kalman_filter_1d(data, process_variance=1e-5, measurement_variance=0.1):
     """
-    Kalman Filtresi: Gürültülü zaman serisi verilerini düzeltmek için kullanılan bir algoritma.
-    Parametreler:
-    - data: Giriş zaman serisi verisi (1D NumPy array).
-    - process_variance: Süreç gürültüsü varyansı.
-    - measurement_variance: Ölçüm gürültüsü varyansı.
+    Kalman Filtresi: 1D Basit Uygulama.
     """
-    n_iter = len(data) # Veri uzunluğu
-    sz = (n_iter,) # Durum vektörünün boyutu
+    n_iter = len(data)
+    sz = (n_iter,)
 
-    # Durum (State) ve Tahmin Başlatma
-    xhat = np.zeros(sz)      # Tahmin edilen değer (state estimate)
-    P = np.zeros(sz)         # Tahmin hatası kovaryansı (uncertainty)
-    xhatminus = np.zeros(sz) # Önceki tahmin
-    Pminus = np.zeros(sz)    # Önceki tahmin hatası kovaryansı
-    K = np.zeros(sz)         # Kalman kazancı
+    xhat = np.zeros(sz)      # Tahmin
+    P = np.zeros(sz)         # Hata kovaryansı
+    xhatminus = np.zeros(sz)
+    Pminus = np.zeros(sz)
+    K = np.zeros(sz)         # Kazanç
 
-    # Başlangıç değerleri
-    xhat[0] = data[0] 
-    P[0] = 1.0 # Başlangıç belirsizliği
+    xhat[0] = data[0]
+    P[0] = 1.0
 
     for k in range(1, n_iter):
-        # Zaman Güncellemesi (Predict)
+        # Tahmin (Predict)
         xhatminus[k] = xhat[k-1]
-        Pminus[k] = P[k - 1] + process_variance
+        Pminus[k] = P[k-1] + process_variance
 
-        # Ölçüm Güncellemesi (Update)
-        K[k] = Pminus[k] / (Pminus[k] + measurement_variance) # Kalman kazancı
-        xhat[k] = xhatminus[k] + K[k] * (data[k] - xhatminus[k]) # Güncellenmiş tahmin
-        P[k] = (1 - K[k]) * Pminus[k] # Güncellenmiş belirsizlik
+        # Güncelleme (Update)
+        K[k] = Pminus[k] / (Pminus[k] + measurement_variance)
+        xhat[k] = xhatminus[k] + K[k] * (data[k] - xhatminus[k])
+        P[k] = (1 - K[k]) * Pminus[k]
 
     return xhat
 
-def apply_filters(X, method= "none"):
+# --- ANA FONKSİYON ---
+
+def apply_filters(X, method="none"):
     """
-    Verilen veri setine seilmiş gelişmiş filtreyi uygular.
-    X: Pandas DataFrame veya NumPy Array
-    method: Uygulanacak filtre yöntemi. Seçenekler:
-        - "none": Filtre uygulanmaz, orijinal veri döndürülür.
-        - "hampel_forloop": Hampel filtresi (for döngüsü ile).
-        - "kalman_1d": 1D Kalman filtresi.
+    Verilen veri setine seçilen gelişmiş filtreyi uygular.
+    X: Pandas DataFrame veya NumPy Array (Satırlar: Örnekler, Sütunlar: Öznitelikler)
+    method: Uygulanacak filtre yöntemi.
     """
-    # Veri tipini kontrol et ve NumPy array'e çevir
-    if isinstance(X,pd.DataFrame):
-        data = X.values.astype(float) #Hesaplamalar için float'a çevir
+    # 1. Veri Tipini Hazırla
+    if isinstance(X, pd.DataFrame):
+        data = X.values.astype(float)
         columns = X.columns
         is_df = True
-    
     else:
         data = X.astype(float)
+        columns = None
         is_df = False
     
-    # Çıktı matrisi (Orijinalin kopyası)
+    # Çıktı matrisi (Kopyası üzerinde çalışacağız)
     X_filtered = data.copy()
     rows, cols = data.shape
 
-    # 1. LOW-PASS (Butterworth IIR)
-    if method == "lowpass":
-        # Order 2, Cutoff 0.1 (Normalize frekans)
-        b, a = butter(2, 0.1, btype='low', analog=False) # type: ignore
-        X_filtered = filtfilt(b, a, data, axis=0)
+    # --- FİLTRE SEÇİMİ ---
 
-    # 2. WAVELET DENOISING
+    if method == "none":
+        pass # Hiçbir şey yapma
+
+    # 1. LOW-PASS (Butterworth)
+    elif method == "lowpass":
+        try:
+            b, a = butter(2, 0.1, btype='low', analog=False) # type: ignore
+            X_filtered = filtfilt(b, a, data, axis=0)
+        except Exception as e:
+            print(f"Lowpass hatası: {e}")
+
+    # 2. WAVELET (DALGACIK) - Kritik Düzeltmeler Yapıldı
     elif method == "wavelet":
-        # Her sütun için ayrı ayrı uygula
         for i in range(cols):
             signal = data[:, i]
-            # Wavelet ayrıştırma (db4 dalgacığı kullan)
+            
+            # Ayrıştırma (Decomposition)
+            # 'level=2' genelde yeterlidir, sinyal uzunluğuna göre artırılabilir
             coeffs = pywt.wavedec(signal, 'db4', level=2)
-            # Yumuşak eşikleme (Soft Thresholding) - Gürültüyü sil
-            threshold = 0.04 # Deneme yanılma ile bulunabilir
+            
+            # Eşikleme (Thresholding)
+            threshold = 0.04
             coeffs_thresh = [pywt.threshold(c, threshold, mode='soft') for c in coeffs]
-            # Geri birleştirme
-            X_filtered[:, i] = pywt.waverec(coeffs_thresh, 'db4')
-            # Boyut uyuşmazlığı olursa (Wavelet bazen 1-2 piksell ekler) kırp
-            if len(X_filtered[:, i]) > rows:
-                 X_filtered[:, i] = X_filtered[:, i][:rows]
+            
+            # Geri Oluşturma (Reconstruction)
+            reconstructed = pywt.waverec(coeffs_thresh, 'db4')
+            
+            # BOYUT EŞİTLEME (Padding/Trimming)
+            # Wavelet dönüşümü bazen boyutu 1-2 piksel değiştirebilir.
+            if len(reconstructed) > rows:
+                reconstructed = reconstructed[:rows]
+            elif len(reconstructed) < rows:
+                reconstructed = np.pad(reconstructed, (0, rows - len(reconstructed)), mode='edge')
+            
+            X_filtered[:, i] = reconstructed
 
-    # 3. MOVING AVERAGE (MA)
+    # 3. MOVING AVERAGE
     elif method == "moving_average":
-        # Pandas rolling fonksiyonu çok hızlıdır
         df_temp = pd.DataFrame(data)
+        # min_periods=1 kenarlarda NaN oluşmasını engeller
         X_filtered = df_temp.rolling(window=5, center=True, min_periods=1).mean().values
 
-    # 4. EXPONENTIAL MOVING AVERAGE (EMA)
+    # 4. EMA
     elif method == "ema":
         df_temp = pd.DataFrame(data)
-        # alpha: Yumuşatma faktörü (düşükse daha pürüzsüz)
         X_filtered = df_temp.ewm(alpha=0.3, adjust=False).mean().values
 
     # 5. SAVITZKY-GOLAY
     elif method == "savgol":
-        # Pencere 9, Polinom derecesi 3
         if rows > 9:
             X_filtered = savgol_filter(data, window_length=9, polyorder=3, axis=0)
         else:
-            print("Veri çok kısa, SavGol atlandı.")
+            # Veri çok kısaysa filtreyi pas geç
+            pass
 
-    # 6. LOESS (Local Regression) - DİKKAT: Yavaştır
+    # 6. LOESS (Dikkat: Büyük veride yavaştır)
     elif method == "loess":
-        # Her sütun için ayrı ayrı
+        # Sadece ilk 1000 örnek için falan yapmak gerekebilir çok büyükse
         for i in range(cols):
-            # frac: Verinin ne kadarını lokal olarak kullanacağı
-            # lowess fonksiyonu (x, y) döner, biz sadece y'yi ([:, 1]) alıyoruz
+            # frac=0.1 verinin %10'unu lokal pencere olarak alır
             smoothed = sm.nonparametric.lowess(data[:, i], np.arange(rows), frac=0.1)
             X_filtered[:, i] = smoothed[:, 1]
 
-    # 7. SPLINE SMOOTHING
+    # 7. SPLINE
     elif method == "spline":
         x_axis = np.arange(rows)
         for i in range(cols):
-            # s: Smoothing factor (daha yüksek = daha düz)
-            spl = UnivariateSpline(x_axis, data[:, i], s=rows*10) 
-            X_filtered[:, i] = spl(x_axis)
+            try:
+                spl = UnivariateSpline(x_axis, data[:, i], s=rows*10)
+                X_filtered[:, i] = spl(x_axis)
+            except:
+                pass
 
-    # 8. KALMAN FILTER
+    # 8. KALMAN
     elif method == "kalman":
         for i in range(cols):
             X_filtered[:, i] = kalman_filter_1d(data[:, i])
 
-    # 9. MEDIAN FILTER
+    # 9. MEDIAN
     elif method == "median":
+        # size=(5,1) demek dikey (satırlar boyu) filtrele demek
         X_filtered = median_filter(data, size=(5, 1))
 
-    # 10. HAMPEL FILTER (Outlier Removal)
+    # 10. HAMPEL (Optimize Edilmiş)
     elif method == "hampel":
         for i in range(cols):
-            X_filtered[:, i] = hampel_filter_forloop(data[:, i])
+            X_filtered[:, i] = hampel_filter_pandas(data[:, i])
 
-    # 11. GAUSSIAN FILTER
+    # 11. GAUSSIAN
     elif method == "gaussian":
         X_filtered = gaussian_filter1d(data, sigma=2, axis=0)
 
-    # 12. FİLTRE YOK
-    elif method == "none":
-        pass
-
     else:
-        print(f"Bilinmeyen filtre yöntemi: {method}. 'none' uygulandı.")
+        print(f"Uyarı: Bilinmeyen filtre '{method}'. Orijinal veri döndürülüyor.")
 
-    # Formatı geri döndür
+    # 3. Çıktı Formatı
     if is_df:
-        return pd.DataFrame(X_filtered, columns=columns) # type: ignore
+        return pd.DataFrame(X_filtered, columns=columns)
     else:
         return X_filtered
